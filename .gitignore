@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# レジストリ実体はパスが環境依存のため無視
+config/sources.yaml
+
+# テストで生成される fixture DB
+tests/_fixtures_generated/

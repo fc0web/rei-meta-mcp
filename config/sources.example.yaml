@@ -1,0 +1,49 @@
+# rei-meta-mcp registry (example)
+#
+# 実運用の sources.yaml は .gitignore 済。パスを埋めてから rename すること。
+# §4 の原則: 到達不能を coherent に丸めない。
+
+version: 1
+
+objects:
+  seed_kernel:
+    description: "SEED_KERNEL 理論群 (Rei stack の中心対象)"
+    identity_key: id
+
+sources:
+  # 直接 SQLite を読む。full fingerprint (count + id_set_hash + content_hash)
+  - name: rei-memory-local
+    object: seed_kernel
+    kind: sqlite
+    config:
+      path: "C:/Users/user/rei-memory-mcp/data/seed_kernel.db"
+      table: theories
+      id_column: id
+      body_column: body
+      updated_at_column: updated_at
+    freshness:
+      git_repo: "C:/Users/user/rei-aios"
+
+  # node subprocess を起動し MCP stdio protocol で probe。
+  # get_kernel_status → totalTheories + latestTheoryId + categories を返す。
+  # partial fingerprint (count + latest_id + categories_hash)。
+  - name: rei-aios-local-mcp
+    object: seed_kernel
+    kind: mcp_stdio
+    config:
+      command: "node"
+      args: ["C:/Users/user/rei-aios/dist/mcp/start-mcp.js"]
+      cwd: "C:/Users/user/rei-aios"
+      tool: "get_kernel_status"
+      timeout_sec: 30
+    freshness:
+      git_repo: "C:/Users/user/rei-aios"
+
+  # deployed remote rei-aios (claude.ai remote-devices 経由)。
+  # Phase 1 では Python から直接 probe 不可 → 常に unreachable。
+  # §4 に従い、この事実を毎回明示する。
+  - name: rei-aios-remote
+    object: seed_kernel
+    kind: unreachable_placeholder
+    config:
+      reason: "deployed via claude.ai remote-devices; not directly probeable from Python (Phase 1 scope)"

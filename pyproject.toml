@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rei-meta-mcp"
+version = "0.1.0-alpha"
+description = "Meta connector for Rei stack MCP servers: coherence checking across sources pointing to the same object"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+requires-python = ">=3.11"
+authors = [{ name = "Nobuki Fujimoto", email = "fc2webb@gmail.com" }]
+dependencies = [
+    "mcp>=2.0.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+rei-meta-mcp = "rei_meta_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rei_meta_mcp"]
