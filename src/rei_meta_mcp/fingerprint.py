@@ -68,11 +68,16 @@ def compute_partial_fingerprint(
     record_count: int,
     latest_id: str | None,
     categories: dict[str, int] | None = None,
+    source_payload_keys: list[str] | None = None,
 ) -> dict[str, Any]:
     """Partial fingerprint from status-endpoint style responses.
 
     categories is treated as a mapping of category name -> count.
     Sorted before hashing so order does not affect the result.
+
+    source_payload_keys (Phase 2): the actual top-level keys returned by
+    the adapter's underlying tool. Used by coherence._check_contract to
+    compare against object.expected_fields. Passed through, not hashed.
     """
     if categories:
         joined = "\n".join(
@@ -87,6 +92,9 @@ def compute_partial_fingerprint(
         "record_count": record_count,
         "latest_id": latest_id,
         "categories_hash": categories_hash,
+        "source_payload_keys": (
+            sorted(source_payload_keys) if source_payload_keys else None
+        ),
     }
 
 

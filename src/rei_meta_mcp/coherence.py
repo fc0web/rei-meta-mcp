@@ -65,6 +65,7 @@ def _probe_source(source: SourceDef, obj: ObjectDef) -> dict[str, Any]:
             record_count=result.summary["record_count"],
             latest_id=result.summary.get("latest_id"),
             categories=result.summary.get("categories"),
+            source_payload_keys=result.summary.get("source_payload_keys"),
         )
     else:
         return {
@@ -151,6 +152,8 @@ def check_coherence(
             + " — 'not checked' is NOT 'coherent' (§4)"
         )
 
+    warnings.extend(_check_contract(obj, probes))
+
     if not reachable:
         status = "unreachable"
         divergence = None
@@ -196,6 +199,50 @@ def check_coherence(
         "divergence": divergence,
         "warnings": warnings,
     }
+
+
+def _check_contract(
+    obj: ObjectDef,
+    probes: list[dict[str, Any]],
+) -> list[str]:
+    """Phase 2 contract check: compare each reachable source's actual
+    payload keys against the object's declared expected_fields.
+
+    Returns list of warning strings (empty if no expectation declared, or
+    every reachable summary-source matches). Never changes the status
+    verdict — Phase 2A is warning-only, following §4's discipline of
+    "unchecked is not coherent" extended to "contract mismatch is not
+    coherent silently".
+
+    Only summary-flavour sources (mcp_stdio) carry `source_payload_keys`;
+    full-flavour sources (sqlite records) have fixed schema `id/body/
+    updated_at` and are intentionally skipped from contract check.
+    """
+    if not obj.expected_fields:
+        return []
+    warnings: list[str] = []
+    expected = set(obj.expected_fields.keys())
+    for probe in probes:
+        if not probe["reachable"]:
+            continue
+        fp = probe.get("fingerprint") or {}
+        actual_keys = fp.get("source_payload_keys")
+        if actual_keys is None:
+            continue
+        actual = set(actual_keys)
+        missing = expected - actual
+        extra = actual - expected
+        if missing:
+            warnings.append(
+                f"CONTRACT: {probe['name']} — expected fields missing from "
+                f"payload: {sorted(missing)} (description ↔ payload drift)"
+            )
+        if extra:
+            warnings.append(
+                f"CONTRACT: {probe['name']} — payload has fields not in "
+                f"expected: {sorted(extra)} (undocumented)"
+            )
+    return warnings
 
 
 def _detail_only_in(

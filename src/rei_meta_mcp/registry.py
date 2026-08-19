@@ -19,6 +19,10 @@ class ObjectDef:
     name: str
     description: str
     identity_key: str
+    expected_fields: dict[str, str] | None = None
+    # Phase 2: name → type hint map (informational; name-only check in Phase 2A).
+    # Compared against adapter-reported `source_payload_keys` (mcp_stdio only).
+    # Absent / None → no contract check (backward compat with Phase 1 registries).
 
 
 @dataclass
@@ -69,10 +73,21 @@ def load_registry(path: str | Path) -> Registry:
     for name, spec in raw_objects.items():
         if not isinstance(spec, dict):
             raise RegistryError(f"object {name!r}: must be a mapping")
+        raw_expected = spec.get("expected_fields")
+        expected: dict[str, str] | None
+        if raw_expected is None:
+            expected = None
+        elif isinstance(raw_expected, dict):
+            expected = {str(k): str(v) for k, v in raw_expected.items()}
+        else:
+            raise RegistryError(
+                f"object {name!r}: 'expected_fields' must be a mapping or omitted"
+            )
         objects[name] = ObjectDef(
             name=name,
             description=spec.get("description", ""),
             identity_key=spec.get("identity_key", "id"),
+            expected_fields=expected,
         )
 
     raw_sources = data.get("sources") or []

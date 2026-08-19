@@ -9,6 +9,17 @@ objects:
   seed_kernel:
     description: "SEED_KERNEL 理論群 (Rei stack の中心対象)"
     identity_key: id
+    # Phase 2 (optional): declare the fields the object's status endpoint
+    # is expected to return. Compared name-by-name against the adapter's
+    # actual `source_payload_keys`. Mismatches surface as CONTRACT: warnings
+    # (never silently swallowed; §4 extended to contract axis).
+    # Values are type hints — informational in Phase 2A, name check only.
+    # Omit to skip contract check entirely (backward compat).
+    expected_fields:
+      totalTheories: int
+      latestTheoryId: str
+      categories: dict
+      dfumtValue: scalar
 
 sources:
   # 直接 SQLite を読む。full fingerprint (count + id_set_hash + content_hash)
