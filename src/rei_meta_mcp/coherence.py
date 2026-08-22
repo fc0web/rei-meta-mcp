@@ -14,6 +14,7 @@ from rei_meta_mcp.adapters.base import UnreachableError
 from rei_meta_mcp.fingerprint import (
     compute_full_fingerprint,
     compute_partial_fingerprint,
+    fingerprint_canonical,
     fingerprints_agree,
 )
 from rei_meta_mcp.registry import ObjectDef, Registry, SourceDef
@@ -174,16 +175,24 @@ def check_coherence(
             counts = {
                 p["name"]: p["fingerprint"]["record_count"] for p in reachable
             }
+            # Type-separated latest fields (see fingerprint.fingerprint_canonical).
+            # The previous `latest_id or latest_timestamp` fallback mixed an
+            # identifier string with an ISO-8601 datetime string in one slot,
+            # which was the direct cause of the 2026-08-22 false-positive
+            # `divergent`. Report each field in its own key; None means the
+            # source's flavour does not expose it.
             latest_ids = {
-                p["name"]: (
-                    p["fingerprint"].get("latest_id")
-                    or p["fingerprint"].get("latest_timestamp")
-                )
+                p["name"]: fingerprint_canonical(p["fingerprint"])["latest_id"]
+                for p in reachable
+            }
+            latest_timestamps = {
+                p["name"]: fingerprint_canonical(p["fingerprint"])["latest_timestamp"]
                 for p in reachable
             }
             divergence = {
                 "count_diff": counts,
-                "latest_diff": latest_ids,
+                "latest_id_diff": latest_ids,
+                "latest_timestamp_diff": latest_timestamps,
                 "disagreements": disagreements,
                 "only_in": None,
                 "content_diff": None,
