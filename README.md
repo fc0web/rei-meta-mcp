@@ -69,7 +69,7 @@ registry のパスは環境変数 `REI_META_MCP_REGISTRY` で上書き可能。
 2. **partial fingerprint** の source (mcp_stdio) 間の一致は「不一致がない」ことの確認であって「完全一致」の証明ではない (`content_hash` レベルで見られない部分がある)
 3. 圏論用語は 5 つだけ (対象・射・等化子・合成・恒等射) 荷重を負う。他は避ける
 4. 現状 3 source の Phase 1 spike。対象が増えるほど価値が増す構造
-5. Phase 2 (履歴・定期実行・通知) と Phase 3 (スキーマ推論・射の一般化) は、Phase 1 が実運用で機能した後に判断
+5. Phase 進行は [`docs/ROADMAP.md`](docs/ROADMAP.md) を参照。Phase 1 spike + Phase 2A (contract check) が現状。Phase 2 / Phase 3 は Phase 1 + Phase 2A の実運用結果で判断。
 
 ## License
 
