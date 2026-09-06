@@ -203,7 +203,12 @@ sources:
 
     r = check_coherence(reg, "seed_kernel")
     # Phase 2A: contract mismatch does NOT flip status.
-    assert r["status"] == "coherent"
+    # STEP 1839: `coherent` renamed to `coherent_on_basis` when the
+    # comparison-basis contract landed. Intentional flip — the verdict now
+    # states what basis it stands on. Two agreeing partial-flavour stub_mcp
+    # sources: meet = {record_count, latest_id, categories_hash}, no
+    # unchecked → coherent_on_basis. See coherence.py STEP 1839 header.
+    assert r["status"] == "coherent_on_basis"
     # But it DOES surface a CONTRACT warning per source.
     contract_warnings = [w for w in r["warnings"] if w.startswith("CONTRACT:")]
     assert len(contract_warnings) == 2  # one per source

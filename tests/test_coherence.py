@@ -33,9 +33,21 @@ def test_coherent_when_identical(two_db_identical, make_registry):
     a, b = two_db_identical
     reg = load_registry(make_registry(_yaml_two_sqlite(a, b)))
     r = check_coherence(reg, "seed_kernel")
-    assert r["status"] == "coherent"
+    # STEP 1839: `coherent` was intentionally downgraded to
+    # `coherent_on_basis` when the comparison-basis contract landed. The
+    # verdict now names what it stands on (basis non-empty AND no unchecked
+    # sources) so callers cannot mistake meet-narrow agreement for total
+    # agreement. Two identical full-flavour sqlite sources: meet =
+    # {record_count, id_set_hash, content_hash, latest_timestamp},
+    # uncheckedSources = [] → coherent_on_basis.
+    assert r["status"] == "coherent_on_basis"
     assert r["divergence"] is None
     assert all(s["reachable"] for s in r["sources"])
+    # STEP 1839: comparisonBasis is now always present.
+    basis = r["comparisonBasis"]
+    assert basis["separatingPower"] == "content"
+    assert set(basis["comparedFields"]) >= {"record_count", "content_hash"}
+    assert basis["uncheckedSources"] == []
 
 
 def test_divergent_on_count_diff(two_db_count_diff, make_registry):

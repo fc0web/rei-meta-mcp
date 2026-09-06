@@ -2,6 +2,24 @@
 
 Compares fingerprints across sources pointing at the same object.
 §4: unreachable is not coherent. single_source is not coherent.
+
+STEP 1839 (2026-09-06): comparison-basis contract 適合
+--------------------------------------------------------
+rei-aios STEP 1838 の comparison-basis-contract v0.1 が定義する 4 gate に
+機械可読で適合させる:
+- 返り値に `comparisonBasis` (10 field) を常時添付
+- `coherent` → `coherent_on_basis` に降格 (comparedFields 非空 かつ
+  uncheckedSources 空 の ときのみ)
+- comparedFields 空 or uncheckedSources 非空 かつ agree → `insufficient_basis`
+  (G1 / G4 を機械可読に守る)
+- divergence は meet 内の field のみ (record_count 等)。
+  meet 外の観測 (latest_id / latest_timestamp の片側欠測) は
+  `unavailable_fields` に 別 key で 分離
+- `undetectable[]` に 「record_count 保存乖離は 検出不能」 等の
+  盲点を 常に 少なくとも 1 件 宣言 (G2)
+
+Breaking change: 従来 `coherent` を状態値として parse していた呼び出しは
+`coherent_on_basis` (positive verdict、意図的な降格) を受けるように追随要。
 """
 
 from __future__ import annotations
@@ -111,18 +129,225 @@ def _compute_only_in(
     return None  # populated by check_coherence when detail=True
 
 
+# ────────────────────────────────────────────────
+# STEP 1839: comparison-basis contract adapters
+# ────────────────────────────────────────────────
+
+# canonical field ordering per fingerprint flavour.
+# Kept in sync with fingerprint.fingerprint_canonical() spec — that function
+# returns a dict with these keys (record_count present in both flavours;
+# flavour-specific fields None when absent).
+_FULL_FIELDS = ("record_count", "id_set_hash", "content_hash", "latest_timestamp")
+_PARTIAL_FIELDS = ("record_count", "latest_id", "categories_hash")
+
+
+def _available_fields_of(fp: dict[str, Any] | None) -> list[str]:
+    """Return the fingerprint fields the given source actually exposes.
+
+    Uses the canonical view: fields present with non-None value are
+    considered available. `flavour` is metadata, not a comparable field.
+    """
+    if fp is None:
+        return []
+    canon = fingerprint_canonical(fp)
+    fields = _FULL_FIELDS if canon.get("flavour") == "full" else _PARTIAL_FIELDS
+    return sorted(k for k in fields if canon.get(k) is not None)
+
+
+def _classify_separating_power(compared: list[str]) -> str:
+    """Map the meet field set to the STEP 1838 SeparatingPower ordinal.
+
+    content > identity-set > multi-scalar > scalar > none.
+    """
+    if not compared:
+        return "none"
+    if "content_hash" in compared:
+        return "content"
+    if "id_set_hash" in compared:
+        return "identity-set"
+    non_count = [f for f in compared if f != "record_count"]
+    if non_count:
+        return "multi-scalar"
+    return "scalar"
+
+
+def _undetectable_classes(
+    compared: list[str],
+    available: dict[str, list[str]],
+) -> list[str]:
+    """Name the blind spots implied by this meet (G2 requirement).
+
+    Every entry names a concrete class of divergence the basis cannot see,
+    not vague reservations. Empty is only allowed when separatingPower is
+    'content' (the strongest); the caller respects that gate.
+    """
+    out: list[str] = []
+    if not compared:
+        out.append(
+            "no comparable fields across sources; nothing is detectable "
+            "on this basis"
+        )
+        return out
+    power = _classify_separating_power(compared)
+    if power == "scalar":
+        out.append(
+            "record_count preservation blindness: two sources with the "
+            "same count but different record identities or contents "
+            "(swap / edit) are indistinguishable on this basis"
+        )
+    if "content_hash" not in compared:
+        out.append(
+            "content-level record edits (body change within a preserved "
+            "id set) are not detectable without content_hash on both sides"
+        )
+    if "id_set_hash" not in compared:
+        out.append(
+            "id-set replacement (same count, different ids) is not "
+            "detectable without id_set_hash on both sides"
+        )
+    # Cross-flavour note when reachable sources disagree on flavour.
+    flavours = {
+        (fp := (available.get(name, []))) and ("full" if "content_hash" in fp else "partial")
+        for name in available
+        if available.get(name)
+    }
+    flavours.discard(None)
+    if len(flavours) > 1:
+        out.append(
+            "cross-flavour comparison (full × partial): only fields "
+            "present in every flavour participate in the meet — "
+            "everything outside is silence, not agreement"
+        )
+    return out
+
+
+def _build_comparison_basis(
+    object_name: str,
+    probes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Assemble the STEP 1838 ComparisonBasis payload for these probes.
+
+    Never raises. Returns the 10-field structure verify.ts expects at the
+    contract layer:
+
+      sourcesDeclared   — every registered source name, regardless of reach
+      sourcesCompared   — reachable sources that supplied a fingerprint
+      uncheckedSources  — sources that failed to be probed (unreachable)
+      availableFields   — per source, the fingerprint fields it exposed
+      comparedFields    — the meet (intersection) across sourcesCompared
+      basisOrigin       — 'intersection' when we derive the meet from data
+      separatingPower   — classified by the meet, per SEPARATING_POWER_ORDER
+      undetectable      — concrete blind-spot classes for this basis
+    """
+    sources_declared = [p["name"] for p in probes]
+    reachable = [p for p in probes if p["reachable"] and p["fingerprint"] is not None]
+    unreachable = [p for p in probes if not (p["reachable"] and p["fingerprint"] is not None)]
+
+    sources_compared = [p["name"] for p in reachable]
+    unchecked_sources = [p["name"] for p in unreachable]
+
+    available: dict[str, list[str]] = {}
+    for p in reachable:
+        available[p["name"]] = _available_fields_of(p["fingerprint"])
+    for p in unreachable:
+        available[p["name"]] = []
+
+    if len(reachable) >= 2:
+        sets = [set(available[name]) for name in sources_compared]
+        compared = sorted(set.intersection(*sets))
+    else:
+        # 0 or 1 reachable → no meet across ≥2 sources → basis is empty.
+        compared = []
+
+    power = _classify_separating_power(compared)
+    undetectable = _undetectable_classes(compared, available)
+
+    return {
+        "gauge": "rei_meta_coherence",
+        "unit": object_name,
+        "sourcesDeclared": sources_declared,
+        "sourcesCompared": sources_compared,
+        "uncheckedSources": unchecked_sources,
+        "availableFields": available,
+        "comparedFields": compared,
+        "basisOrigin": "intersection" if compared else "none",
+        "separatingPower": power,
+        "undetectable": undetectable,
+    }
+
+
+def _split_divergence_by_meet(
+    reachable: list[dict[str, Any]],
+    meet: list[str],
+    disagreements: list[str],
+    detail_only_in: dict[str, list[str]] | None,
+) -> dict[str, Any]:
+    """Return divergence structure with meet-inside vs meet-outside separated.
+
+    STEP 1839 G3 requires: fields not in every source's availableFields must
+    not be reported as `*_diff` (a diff implies both sides supplied a
+    value). Meet-outside observations go under `unavailable_fields` with a
+    per-source value/None map so callers can still see them without
+    conflating "absent" with "differs".
+    """
+    def per_source(field: str) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for p in reachable:
+            canon = fingerprint_canonical(p["fingerprint"])
+            result[p["name"]] = canon.get(field)
+        return result
+
+    # count_diff is always inside the meet for any 2 reachable sources
+    # (record_count is present in every fingerprint flavour).
+    div: dict[str, Any] = {
+        "count_diff": {p["name"]: p["fingerprint"]["record_count"] for p in reachable},
+        "disagreements": disagreements,
+        "only_in": detail_only_in,
+        "content_diff": None,
+    }
+
+    # Every field previously reported as *_diff but not in the meet moves
+    # to unavailable_fields with per-source values. This preserves the
+    # diagnostic information without lying about a "diff".
+    unavailable: dict[str, dict[str, Any]] = {}
+    for field in ("latest_id", "latest_timestamp"):
+        if field not in meet:
+            values = per_source(field)
+            if any(v is not None for v in values.values()):
+                unavailable[field] = values
+    if unavailable:
+        div["unavailable_fields"] = unavailable
+
+    return div
+
+
 def check_coherence(
     registry: Registry,
     object_name: str,
     detail: bool = False,
 ) -> dict[str, Any]:
-    """Run coherence check for one object across all its sources."""
+    """Run coherence check for one object across all its sources.
+
+    STEP 1839 shape: always emits `comparisonBasis` (the 10-field
+    ComparisonBasis from rei-aios STEP 1838 contract). Status values:
+
+      unknown_object    — the object name is not in the registry
+      no_sources        — the object is registered but has no sources
+      unreachable       — 0 reachable sources
+      single_source     — exactly 1 reachable source (no meet possible)
+      coherent_on_basis — reachable ≥ 2, all agree, comparedFields non-empty,
+                          uncheckedSources empty (G1+G2+G3+G4 all pass)
+      insufficient_basis — reachable ≥ 2, all agree, but comparedFields empty
+                          (G1 blocked) OR uncheckedSources non-empty (G4 blocked)
+      divergent         — pairwise disagreement on meet fields
+    """
     if object_name not in registry.objects:
         return {
             "object": object_name,
             "status": "unknown_object",
             "checked_at": _now_iso(),
             "sources": [],
+            "comparisonBasis": _build_comparison_basis(object_name, []),
             "divergence": None,
             "warnings": [f"object {object_name!r} not defined in registry"],
         }
@@ -136,11 +361,13 @@ def check_coherence(
             "status": "no_sources",
             "checked_at": _now_iso(),
             "sources": [],
+            "comparisonBasis": _build_comparison_basis(object_name, []),
             "divergence": None,
             "warnings": [f"object {object_name!r} has no registered sources"],
         }
 
     probes = [_probe_source(s, obj) for s in sources]
+    basis = _build_comparison_basis(object_name, probes)
 
     reachable = [p for p in probes if p["reachable"]]
     unreachable = [p for p in probes if not p["reachable"]]
@@ -167,44 +394,48 @@ def check_coherence(
         divergence = None
     else:
         disagreements = _pairwise_agreement(probes)
-        if not disagreements:
-            status = "coherent"
-            divergence = None
-        else:
+        if disagreements:
             status = "divergent"
-            counts = {
-                p["name"]: p["fingerprint"]["record_count"] for p in reachable
-            }
-            # Type-separated latest fields (see fingerprint.fingerprint_canonical).
-            # The previous `latest_id or latest_timestamp` fallback mixed an
-            # identifier string with an ISO-8601 datetime string in one slot,
-            # which was the direct cause of the 2026-08-22 false-positive
-            # `divergent`. Report each field in its own key; None means the
-            # source's flavour does not expose it.
-            latest_ids = {
-                p["name"]: fingerprint_canonical(p["fingerprint"])["latest_id"]
-                for p in reachable
-            }
-            latest_timestamps = {
-                p["name"]: fingerprint_canonical(p["fingerprint"])["latest_timestamp"]
-                for p in reachable
-            }
-            divergence = {
-                "count_diff": counts,
-                "latest_id_diff": latest_ids,
-                "latest_timestamp_diff": latest_timestamps,
-                "disagreements": disagreements,
-                "only_in": None,
-                "content_diff": None,
-            }
-            if detail:
-                divergence["only_in"] = _detail_only_in(sources, obj, probes)
+            detail_only_in = _detail_only_in(sources, obj, probes) if detail else None
+            divergence = _split_divergence_by_meet(
+                reachable=reachable,
+                meet=basis["comparedFields"],
+                disagreements=disagreements,
+                detail_only_in=detail_only_in,
+            )
+        else:
+            # All reachable agree. Now G1 (basis non-empty) and G4
+            # (no unchecked) determine whether we can call this coherent.
+            g1_ok = len(basis["comparedFields"]) > 0
+            g4_ok = len(basis["uncheckedSources"]) == 0
+            if g1_ok and g4_ok:
+                status = "coherent_on_basis"
+                divergence = None
+            else:
+                # Sources agree on what they can compare, but the basis
+                # is either empty (G1) or incomplete (G4). Either way,
+                # we must not claim coherence — the contract calls this
+                # `insufficient_basis`.
+                status = "insufficient_basis"
+                divergence = None
+                if not g1_ok:
+                    warnings.append(
+                        "INSUFFICIENT_BASIS: no fields present in every "
+                        "reachable source; agreement is vacuous"
+                    )
+                if not g4_ok:
+                    warnings.append(
+                        "INSUFFICIENT_BASIS: "
+                        f"{len(basis['uncheckedSources'])} source(s) unchecked; "
+                        "reachable sources agree only among themselves"
+                    )
 
     return {
         "object": object_name,
         "status": status,
         "checked_at": _now_iso(),
         "sources": probes,
+        "comparisonBasis": basis,
         "divergence": divergence,
         "warnings": warnings,
     }
