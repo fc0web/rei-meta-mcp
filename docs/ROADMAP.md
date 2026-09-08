@@ -30,6 +30,16 @@ Honest scope §4 で書かれている「対象が増えるほど価値が増す
 
 **経緯**: README §5 元記載の Phase 2 リスト（履歴・定期実行・通知）には含まれていない。finding30 系対応として先行実装。README の Phase 進行と実装順が同期していないことを、このドキュメントで追跡する。
 
+### 補助ツール: coherence dashboard (2026-08-25 追加)
+
+`rei-meta-dashboard` CLI として同梱。CHECKER (別 repo) の `stats()` と本パッケージの `check_coherence()` を並置表示する読み取り専用ツール。Phase 1 + 2A の実運用データを 1 画面で眺めるための補助で、以下は **意図的に含まれない**:
+
+- 定期実行・履歴永続化 → Phase 2 で判断
+- 通知 (Slack / mail) → Phase 2 で判断
+- 両者の合成指標化 → Phase 3 で判断
+
+`stats()` と `check_coherence()` を並べて眺めた結果として合成の設計判断が自然に浮上するのを待つ。
+
 ## Phase 2 — 元記載（未着手）
 
 - **履歴**: coherence 実行結果の永続化。今は毎回 in-memory で probe している。

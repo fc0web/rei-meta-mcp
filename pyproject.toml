@@ -22,6 +22,7 @@ dev = [
 
 [project.scripts]
 rei-meta-mcp = "rei_meta_mcp.server:main"
+rei-meta-dashboard = "rei_meta_mcp.dashboard:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rei_meta_mcp"]
