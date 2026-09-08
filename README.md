@@ -63,6 +63,67 @@ uv run rei-meta-mcp                                  # stdio で MCP server 起�
 
 registry のパスは環境変数 `REI_META_MCP_REGISTRY` で上書き可能。
 
+## 補助ツール: coherence dashboard
+
+`rei-meta-dashboard` は、`rei-checker-mcp` の `stats()` と本 repo の `check_coherence()` を **1 画面に並べて表示する読み取り専用の CLI** です。片方が使えなくても、もう片方は表示します (fingerprints_agree-style silence)。
+
+### install (通常インストールに含まれる)
+
+```bash
+uv pip install -e ".[dev]"
+# rei-meta-dashboard が PATH に登録される (rei-meta-mcp と並列)
+```
+
+### 環境変数
+
+| 変数 | 何を指すか | 既定 |
+|---|---|---|
+| `REI_CHECKER_MODULE_DIR` | rei-checker-mcp の checkout root | (必須。未設定なら CHECKER 側は UNAVAILABLE) |
+| `REI_CHECKER_LEDGER` | ledger.jsonl のパス | (checker 側の既定に委譲) |
+| `REI_META_MCP_REGISTRY` | sources.yaml のパス | `<cwd>/config/sources.yaml` |
+| `REI_DASHBOARD_OBJECT` | 対象 object 名 | `seed_kernel` |
+
+コマンドライン引数で object 名を渡すと env より優先されます:
+
+```bash
+rei-meta-dashboard seed_kernel
+```
+
+### 実行例
+
+```bash
+export REI_CHECKER_MODULE_DIR=~/rei-checker-mcp
+export REI_META_MCP_REGISTRY=~/rei-meta-mcp/config/sources.yaml
+rei-meta-dashboard
+```
+
+### 出力例 (両側正常)
+
+```
+[CHECKER]                                     [META]
+  decision_rate: 72.7%  (93/128)                object:        seed_kernel
+  valid:         71                             status:        divergent
+  invalid:       22                             checked_at:    2026-08-25T02:14:33+00:00
+  undecided:     35                             sources:       3 (2 reachable, 1 unreachable)
+  top reason:    MISSING_AXIOM (x12)              [OK] rei-memory-local (sqlite)
+  reason_breakdown:                               [OK] rei-aios-local-mcp (mcp_stdio)
+    - MISSING_AXIOM: 12                           [!!] rei-aios-remote (unreachable_placeholder) — ...
+    - PARSE_FAILURE: 2                          warnings (2):
+    - TIMEOUT: 8                                  - UNCHECKED: rei-aios-remote — ...
+```
+
+### 意図的にやらないこと
+
+- **HTML / Web UI** — 初手は CLI text で十分
+- **書き込み・修復** — 両側とも読み取り専用
+- **合成 (両者を単一の指標に畳む)** — 基質が違うので現段階では並置のみ
+- **定期実行・履歴永続化・通知** — Phase 2 で判断
+
+### exit code
+
+- `0` — 少なくとも片方が report を返した
+- `1` — 両方 unavailable
+
 ## Honest scope
 
 1. **検出のみ、修復は行わない** — 判断を人間の外に出さない
